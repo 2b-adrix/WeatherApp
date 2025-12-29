@@ -19,14 +19,12 @@
         android:layout_centerInParent="true"
         android:visibility="gone"/>
 
-
     <ProgressBar
         android:id="@+id/progressBar"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_centerInParent="true"
         android:visibility="gone"/>
-
 
     <RelativeLayout
 
@@ -78,6 +76,7 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
+                    android:background="@color/white"
                     android:orientation="vertical">
 
 
@@ -96,6 +95,7 @@
                         android:layout_marginTop="5dp"
                         android:fontFamily="@font/roboto"
                         android:text="Humidity 50%"
+                        android:textColor="@color/black"
                         android:textSize="18sp"
                         android:textStyle="bold" />
 
@@ -116,6 +116,7 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
+                    android:background="@color/white"
                     android:orientation="vertical">
 
 
@@ -132,6 +133,7 @@
                         android:layout_height="wrap_content"
                         android:layout_gravity="center_horizontal"
                         android:layout_marginTop="5dp"
+                        android:textColor="@color/black"
                         android:fontFamily="@font/roboto"
                         android:text="Wind 10 km/hr"
                         android:textSize="18sp"
@@ -176,7 +178,7 @@
 
             <EditText
                 android:id="@+id/editTextCity"
-                android:layout_width="385dp"
+                android:layout_width="match_parent"
                 android:layout_height="52dp"
                 android:layout_marginStart="10dp"
                 android:layout_marginTop="15dp"
@@ -197,7 +199,7 @@
                 android:layout_gravity="center_horizontal"
                 android:layout_marginTop="20dp"
                 android:backgroundTint="#2F113A"
-                android:text="Change city"
+                android:text="Weather Report"
                 android:textColor="#F4EEEE"
                 android:textSize="24dp"
                 app:cornerRadius="10dp"
@@ -209,7 +211,5 @@
 
 
         </LinearLayout>
-
-
     </RelativeLayout>
 </RelativeLayout>
