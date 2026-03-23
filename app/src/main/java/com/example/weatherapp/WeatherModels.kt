@@ -9,7 +9,8 @@ data class WeatherResponse(
     @SerializedName("name") val name: String,
     @SerializedName("sys") val sys: Sys,
     @SerializedName("visibility") val visibility: Int,
-    @SerializedName("dt") val dt: Long
+    @SerializedName("dt") val dt: Long,
+    @SerializedName("timezone") val timezone: Int // Shift in seconds from UTC
 )
 
 data class ForecastResponse(
@@ -26,7 +27,8 @@ data class ForecastItem(
 
 data class City(
     @SerializedName("name") val name: String,
-    @SerializedName("country") val country: String
+    @SerializedName("country") val country: String,
+    @SerializedName("timezone") val timezone: Int
 )
 
 data class Main(

@@ -12,7 +12,9 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.room.Room
 import com.google.ai.client.generativeai.GenerativeModel
+import com.google.gson.Gson
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
@@ -38,8 +40,14 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
 
     var aiResponse by mutableStateOf<String?>(null)
         private set
+    
+    var detailedAiResponse by mutableStateOf<String?>(null)
+        private set
 
     var isAiLoading by mutableStateOf(false)
+        private set
+
+    var isRefreshing by mutableStateOf(false)
         private set
 
     var isCelsius by mutableStateOf(true)
@@ -58,20 +66,41 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
         apiKey = "AIzaSyCUIdylXmGPrUikDUctR2bifa9gw5X8w8Y"
     )
 
+    private val db = Room.databaseBuilder(
+        application,
+        WeatherDatabase::class.java, "weather-db"
+    ).build()
+    private val weatherDao = db.weatherDao()
+    private val gson = Gson()
+
     private val LAST_CITY_KEY = stringPreferencesKey("last_city")
 
     init {
-        loadLastCity()
+        loadLastCityAndCache()
     }
 
-    private fun loadLastCity() {
+    private fun loadLastCityAndCache() {
         viewModelScope.launch {
+            // 1. Try to load from Cache first for instant UI
+            val cache = weatherDao.getCache()
+            if (cache != null) {
+                try {
+                    val weather = gson.fromJson(cache.weatherJson, WeatherResponse::class.java)
+                    val forecast = gson.fromJson(cache.forecastJson, ForecastResponse::class.java)
+                    weatherUiState = WeatherUiState.Success(weather, forecast)
+                    getAiAdvice(weather)
+                } catch (e: Exception) {
+                    // Cache corrupted
+                }
+            }
+
+            // 2. Then load from DataStore and refresh from Network
             val lastCity = getApplication<Application>().dataStore.data
                 .map { preferences -> preferences[LAST_CITY_KEY] }
                 .first()
             
             if (lastCity != null) {
-                fetchWeather(lastCity)
+                fetchWeather(lastCity, isRefreshingUpdate = cache != null)
             }
         }
     }
@@ -84,19 +113,30 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private suspend fun updateCache(weather: WeatherResponse, forecast: ForecastResponse) {
+        val cache = WeatherCacheEntity(
+            weatherJson = gson.toJson(weather),
+            forecastJson = gson.toJson(forecast),
+            lastUpdated = System.currentTimeMillis()
+        )
+        weatherDao.insertCache(cache)
+    }
+
     fun toggleUnits() {
         isCelsius = !isCelsius
-        val currentState = weatherUiState
-        if (currentState is WeatherUiState.Success) {
-            // Re-fetch to get correct units from API or just convert locally
-            // Fetching is safer for wind speeds and pressure units too
-            fetchWeather(currentState.weather.name)
+        refresh()
+    }
+
+    fun refresh() {
+        val state = weatherUiState
+        if (state is WeatherUiState.Success) {
+            fetchWeather(state.weather.name, isRefreshingUpdate = true)
         }
     }
 
-    fun fetchWeather(city: String) {
+    fun fetchWeather(city: String, isRefreshingUpdate: Boolean = false) {
         viewModelScope.launch {
-            weatherUiState = WeatherUiState.Loading
+            if (isRefreshingUpdate) isRefreshing = true else weatherUiState = WeatherUiState.Loading
             try {
                 coroutineScope {
                     val units = if (isCelsius) "metric" else "imperial"
@@ -108,10 +148,13 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                     
                     weatherUiState = WeatherUiState.Success(weather, forecast)
                     saveLastCity(weather.name)
-                    getAiAdvice(weather, forecast)
+                    updateCache(weather, forecast)
+                    getAiAdvice(weather)
                 }
             } catch (e: Exception) {
-                weatherUiState = WeatherUiState.Error
+                if (!isRefreshingUpdate) weatherUiState = WeatherUiState.Error
+            } finally {
+                isRefreshing = false
             }
         }
     }
@@ -130,7 +173,8 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                     
                     weatherUiState = WeatherUiState.Success(weather, forecast)
                     saveLastCity(weather.name)
-                    getAiAdvice(weather, forecast)
+                    updateCache(weather, forecast)
+                    getAiAdvice(weather)
                 }
             } catch (e: Exception) {
                 weatherUiState = WeatherUiState.Error
@@ -138,24 +182,42 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun getAiAdvice(weather: WeatherResponse, forecast: ForecastResponse) {
+    private fun getAiAdvice(weather: WeatherResponse) {
         viewModelScope.launch {
             isAiLoading = true
             try {
                 val unitStr = if (isCelsius) "°C" else "°F"
-                val prompt = """
-                    You are a helpful weather assistant. 
-                    Current weather in ${weather.name}: ${weather.main.temp}$unitStr, ${weather.weather.firstOrNull()?.description}.
-                    Humidity: ${weather.main.humidity}%, Wind: ${weather.wind.speed} ${if (isCelsius) "km/h" else "mph"}.
-                    Provide a very short (max 2 sentences) and friendly advice for the user today based on this weather.
-                """.trimIndent()
-
+                val prompt = "Provide a 1-sentence friendly weather tip for ${weather.name} where it is currently ${weather.main.temp}$unitStr and ${weather.weather.firstOrNull()?.description}."
                 val response = generativeModel.generateContent(prompt)
                 aiResponse = response.text
             } catch (e: Exception) {
-                aiResponse = "Stay safe and check the forecast!"
+                aiResponse = "Check the forecast and stay prepared!"
             } finally {
                 isAiLoading = false
+            }
+        }
+    }
+
+    fun getDetailedAiInsight() {
+        val state = weatherUiState
+        if (state !is WeatherUiState.Success) return
+        
+        viewModelScope.launch {
+            detailedAiResponse = null
+            try {
+                val weather = state.weather
+                val unitStr = if (isCelsius) "°C" else "°F"
+                val prompt = """
+                    As a professional meteorologist, provide a detailed 3-paragraph breakdown for ${weather.name}.
+                    Current: ${weather.main.temp}$unitStr, Humidity: ${weather.main.humidity}%, Wind: ${weather.wind.speed}.
+                    Paragraph 1: Atmospheric conditions analysis.
+                    Paragraph 2: Health/Activity impact (allergies, exercise, etc).
+                    Paragraph 3: Fun fact about this type of weather.
+                """.trimIndent()
+                val response = generativeModel.generateContent(prompt)
+                detailedAiResponse = response.text
+            } catch (e: Exception) {
+                detailedAiResponse = "Detailed analysis is currently unavailable."
             }
         }
     }

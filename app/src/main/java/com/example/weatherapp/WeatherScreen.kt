@@ -6,35 +6,45 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -46,6 +56,7 @@ fun WeatherScreen(
     val context = LocalContext.current
     var cityInput by remember { mutableStateOf("") }
     val state = viewModel.weatherUiState
+    val focusManager = LocalFocusManager.current
     
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
 
@@ -85,7 +96,7 @@ fun WeatherScreen(
         val colors = if (state is WeatherUiState.Success) {
             getBackgroundColors(state.weather.weather.firstOrNull()?.icon ?: "")
         } else {
-            listOf(Color(0xFF1A237E), Color(0xFF3949AB))
+            listOf(Color(0xFF0F172A), Color(0xFF1E293B))
         }
         Brush.verticalGradient(colors)
     }
@@ -95,84 +106,36 @@ fun WeatherScreen(
             .fillMaxSize()
             .background(brush = backgroundBrush)
     ) {
-        when (state) {
-            is WeatherUiState.Loading -> {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = Color.White)
+        AnimatedContent(
+            targetState = state,
+            transitionSpec = {
+                fadeIn(animationSpec = tween(500)) togetherWith fadeOut(animationSpec = tween(500))
+            },
+            label = "StateTransition"
+        ) { targetState ->
+            when (targetState) {
+                is WeatherUiState.Loading -> {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = Color.Cyan)
+                    }
                 }
-            }
-            is WeatherUiState.Success -> {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    contentPadding = PaddingValues(
-                        top = 16.dp, 
-                        bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 40.dp
+                is WeatherUiState.Success -> {
+                    WeatherContent(
+                        weather = targetState.weather,
+                        forecast = targetState.forecast,
+                        cityInput = cityInput,
+                        onCityInputChange = { cityInput = it },
+                        viewModel = viewModel,
+                        focusManager = focusManager,
+                        context = context,
+                        fusedLocationClient = fusedLocationClient
                     )
-                ) {
-                    item {
-                        Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
-                        SearchBar(
-                            value = cityInput,
-                            onValueChange = { cityInput = it },
-                            onSearch = {
-                                if (cityInput.isNotBlank()) {
-                                    viewModel.fetchWeather(cityInput)
-                                    cityInput = ""
-                                }
-                            },
-                            onMyLocationClick = {
-                                getCurrentLocation(context, fusedLocationClient) { lat, lon ->
-                                    viewModel.fetchWeatherByLocation(lat, lon)
-                                }
-                            },
-                            isCelsius = viewModel.isCelsius,
-                            onToggleUnits = { viewModel.toggleUnits() }
-                        )
-                    }
-
-                    item {
-                        AiAssistanceCard(
-                            response = viewModel.aiResponse,
-                            isLoading = viewModel.isAiLoading
-                        )
-                    }
-
-                    item {
-                        MainWeatherInfo(state.weather, viewModel.isCelsius)
-                    }
-
-                    item {
-                        SectionTitle(title = "Hourly Forecast")
-                        HourlyForecastList(state.forecast, viewModel.isCelsius)
-                    }
-
-                    item {
-                        SectionTitle(title = "Weather Details")
-                        WeatherDetailsGrid(state.weather, viewModel.isCelsius)
-                    }
-                    
-                    item {
-                        SectionTitle(title = "5-Day Forecast")
-                        DailyForecastList(state.forecast, viewModel.isCelsius)
-                    }
-
-                    item {
-                        Spacer(modifier = Modifier.height(20.dp))
-                        Text(
-                            text = "Last updated: ${formatTime(System.currentTimeMillis() / 1000)}",
-                            color = Color.White.copy(alpha = 0.5f),
-                            fontSize = 12.sp
-                        )
-                    }
                 }
-            }
-            is WeatherUiState.Error -> {
-                ErrorView { 
-                    getCurrentLocation(context, fusedLocationClient) { lat, lon ->
-                        viewModel.fetchWeatherByLocation(lat, lon)
+                is WeatherUiState.Error -> {
+                    ErrorView { 
+                        getCurrentLocation(context, fusedLocationClient) { lat, lon ->
+                            viewModel.fetchWeatherByLocation(lat, lon)
+                        }
                     }
                 }
             }
@@ -181,45 +144,456 @@ fun WeatherScreen(
 }
 
 @Composable
-fun AiAssistanceCard(response: String?, isLoading: Boolean) {
+fun WeatherContent(
+    weather: WeatherResponse,
+    forecast: ForecastResponse,
+    cityInput: String,
+    onCityInputChange: (String) -> Unit,
+    viewModel: WeatherViewModel,
+    focusManager: androidx.compose.ui.focus.FocusManager,
+    context: Context,
+    fusedLocationClient: com.google.android.gms.location.FusedLocationProviderClient
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        contentPadding = PaddingValues(
+            top = 16.dp, 
+            bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 24.dp
+        )
+    ) {
+        item {
+            Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
+            ModernSearchBar(
+                value = cityInput,
+                onValueChange = onCityInputChange,
+                onSearch = {
+                    if (cityInput.isNotBlank()) {
+                        viewModel.fetchWeather(cityInput)
+                        onCityInputChange("")
+                        focusManager.clearFocus()
+                    }
+                },
+                onMyLocationClick = {
+                    getCurrentLocation(context, fusedLocationClient) { lat, lon ->
+                        viewModel.fetchWeatherByLocation(lat, lon)
+                        focusManager.clearFocus()
+                    }
+                },
+                isCelsius = viewModel.isCelsius,
+                onToggleUnits = { viewModel.toggleUnits() }
+            )
+        }
+
+        item {
+            HeroSection(weather)
+        }
+
+        item {
+            AiInsightCard(
+                response = viewModel.aiResponse,
+                isLoading = viewModel.isAiLoading
+            )
+        }
+
+        item {
+            BentoGrid(weather, viewModel.isCelsius)
+        }
+
+        item {
+            ForecastSection("Hourly Forecast") {
+                HourlyForecastList(forecast)
+            }
+        }
+        
+        item {
+            ForecastSection("5-Day Forecast") {
+                DailyForecastCard(forecast)
+            }
+        }
+
+        item {
+            Text(
+                text = "System Time: ${formatTime(System.currentTimeMillis() / 1000)}",
+                color = Color.White.copy(alpha = 0.4f),
+                fontSize = 11.sp,
+                modifier = Modifier.padding(top = 24.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun ModernSearchBar(
+    value: String, 
+    onValueChange: (String) -> Unit, 
+    onSearch: () -> Unit,
+    onMyLocationClick: () -> Unit,
+    isCelsius: Boolean,
+    onToggleUnits: () -> Unit
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    val animatedPadding by animateDpAsState(if (isFocused) 4.dp else 12.dp, label = "Padding")
+    
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .clip(RoundedCornerShape(28.dp))
+            .background(Color.White.copy(alpha = 0.1f))
+            .border(1.dp, Color.White.copy(alpha = if (isFocused) 0.4f else 0.15f), RoundedCornerShape(28.dp))
+            .padding(horizontal = animatedPadding),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Default.Search, contentDescription = null, tint = Color.White.copy(alpha = 0.6f))
+        TextField(
+            value = value,
+            onValueChange = onValueChange,
+            placeholder = { Text("Search city (e.g. Mumbai, London)...", color = Color.White.copy(alpha = 0.4f), fontSize = 14.sp) },
+            modifier = Modifier.weight(1f).onFocusChanged { isFocused = it.isFocused },
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = Color.Transparent,
+                unfocusedContainerColor = Color.Transparent,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White
+            ),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { onSearch() })
+        )
+        IconButton(onClick = onMyLocationClick) {
+            Icon(Icons.Default.MyLocation, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+        }
+        VerticalDivider(modifier = Modifier.height(24.dp).padding(horizontal = 4.dp), color = Color.White.copy(alpha = 0.2f))
+        
+        Box(
+            modifier = Modifier
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onToggleUnits() }
+                .padding(horizontal = 8.dp)
+        ) {
+            Text(
+                text = if (isCelsius) "°C" else "°F",
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.animateContentSize()
+            )
+        }
+    }
+}
+
+@Composable
+fun HeroSection(weather: WeatherResponse) {
+    val infiniteTransition = rememberInfiniteTransition(label = "FloatingIcon")
+    val floatingOffset by infiniteTransition.animateFloat(
+        initialValue = -10f,
+        targetValue = 10f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000, easing = EaseInOutSine),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "Offset"
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = weather.name,
+            fontSize = 32.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = Color.White,
+            letterSpacing = (-1).sp
+        )
+        
+        // Show Local Time
+        Text(
+            text = formatLocalTime(weather.dt, weather.timezone),
+            fontSize = 16.sp,
+            color = Color.Cyan.copy(alpha = 0.8f),
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "${weather.main.temp.toInt()}°",
+                fontSize = 86.sp,
+                fontWeight = FontWeight.Light,
+                color = Color.White
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Image(
+                painter = painterResource(id = getWeatherIcon(weather.weather.firstOrNull()?.icon ?: "")),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(90.dp)
+                    .graphicsLayer { translationY = floatingOffset }
+            )
+        }
+        Text(
+            text = weather.weather.firstOrNull()?.description ?: "",
+            fontSize = 18.sp,
+            color = Color.White.copy(alpha = 0.7f)
+        )
+        Text(
+            text = "H:${weather.main.tempMax.toInt()}°  L:${weather.main.tempMin.toInt()}°",
+            fontSize = 14.sp,
+            color = Color.White.copy(alpha = 0.5f),
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    }
+}
+
+@Composable
+fun AiInsightCard(response: String?, isLoading: Boolean) {
     AnimatedVisibility(
         visible = response != null || isLoading,
-        enter = fadeIn() + expandVertically(),
-        exit = fadeOut() + shrinkVertically()
+        enter = expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)) + fadeIn(),
+        exit = shrinkVertically() + fadeOut()
     ) {
-        Card(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 16.dp),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.2f))
-        ) {
-            Row(
-                modifier = Modifier.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                if (isLoading) {
-                    LinearProgressIndicator(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = Color.White,
-                        trackColor = Color.White.copy(alpha = 0.2f)
+                .padding(vertical = 8.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(
+                    brush = Brush.linearGradient(
+                        listOf(Color(0xFF6366F1).copy(alpha = 0.3f), Color(0xFFA855F7).copy(alpha = 0.3f))
                     )
+                )
+                .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(24.dp))
+                .padding(20.dp)
+        ) {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val infiniteTransition = rememberInfiniteTransition(label = "Sparkle")
+                    val alpha by infiniteTransition.animateFloat(
+                        initialValue = 0.5f,
+                        targetValue = 1f,
+                        animationSpec = infiniteRepeatable(tween(1000), RepeatMode.Reverse),
+                        label = "Alpha"
+                    )
+                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color.Cyan.copy(alpha = alpha), modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("AI INSIGHT", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Cyan, letterSpacing = 1.sp)
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                if (isLoading) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(2.dp).clip(CircleShape), color = Color.Cyan, trackColor = Color.White.copy(alpha = 0.1f))
                 } else {
                     Text(
                         text = response ?: "",
                         color = Color.White,
-                        fontSize = 14.sp,
-                        fontStyle = FontStyle.Italic,
+                        fontSize = 15.sp,
+                        lineHeight = 22.sp,
                         fontWeight = FontWeight.Medium
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun BentoGrid(weather: WeatherResponse, isCelsius: Boolean) {
+    val windUnit = if (isCelsius) "km/h" else "mph"
+    
+    Column(modifier = Modifier.padding(vertical = 16.dp)) {
+        Row(modifier = Modifier.height(160.dp)) {
+            BentoItem(
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                label = "WIND",
+                value = "${weather.wind.speed}",
+                unit = windUnit,
+                icon = Icons.Default.Air,
+                index = 0
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            BentoItem(
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                label = "HUMIDITY",
+                value = "${weather.main.humidity}",
+                unit = "%",
+                icon = Icons.Default.WaterDrop,
+                index = 1
+            )
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(modifier = Modifier.height(120.dp)) {
+            BentoItem(
+                modifier = Modifier.weight(1.2f).fillMaxHeight(),
+                label = "FEELS LIKE",
+                value = "${weather.main.feelsLike.toInt()}°",
+                unit = "",
+                icon = Icons.Default.Thermostat,
+                index = 2
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            BentoItem(
+                modifier = Modifier.weight(0.8f).fillMaxHeight(),
+                label = "PRESSURE",
+                value = "${weather.main.pressure}",
+                unit = "hPa",
+                icon = Icons.Default.Compress,
+                small = true,
+                index = 3
+            )
+        }
+    }
+}
+
+@Composable
+fun BentoItem(
+    modifier: Modifier,
+    label: String,
+    value: String,
+    unit: String,
+    icon: ImageVector,
+    small: Boolean = false,
+    index: Int
+) {
+    var isVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(index * 100L)
+        isVisible = true
+    }
+
+    AnimatedVisibility(
+        visible = isVisible,
+        enter = slideInVertically { it / 2 } + fadeIn(tween(600)),
+        modifier = modifier
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color.White.copy(alpha = 0.08f))
+                .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(24.dp))
+                .padding(16.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(icon, contentDescription = null, tint = Color.White.copy(alpha = 0.4f), modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(label, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.4f), letterSpacing = 0.5.sp)
+                }
+                Column {
+                    Text(
+                        text = value,
+                        fontSize = if (small) 24.sp else 32.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White
+                    )
+                    if (unit.isNotEmpty()) {
+                        Text(unit, fontSize = 12.sp, color = Color.White.copy(alpha = 0.4f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ForecastSection(title: String, content: @Composable () -> Unit) {
+    Column(modifier = Modifier.padding(vertical = 12.dp)) {
+        Text(
+            text = title,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White.copy(alpha = 0.6f),
+            modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)
+        )
+        content()
+    }
+}
+
+@Composable
+fun HourlyForecastList(forecast: ForecastResponse) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(horizontal = 4.dp)
+    ) {
+        itemsIndexed(forecast.list.take(16)) { index, item ->
+            var isVisible by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) {
+                delay(index * 50L)
+                isVisible = true
+            }
+
+            AnimatedVisibility(
+                visible = isVisible,
+                enter = scaleIn(initialScale = 0.8f) + fadeIn()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .width(64.dp)
+                        .clip(RoundedCornerShape(32.dp))
+                        .background(Color.White.copy(alpha = 0.05f))
+                        .padding(vertical = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(formatLocalTime(item.dt, forecast.city.timezone), fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Image(
+                        painter = painterResource(id = getWeatherIcon(item.weather.firstOrNull()?.icon ?: "")),
+                        contentDescription = null,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text("${item.main.temp.toInt()}°", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DailyForecastCard(forecast: ForecastResponse) {
+    val dailyItems = forecast.list.filterIndexed { index, _ -> index % 8 == 0 }
+    
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(Color.White.copy(alpha = 0.05f))
+            .padding(16.dp)
+    ) {
+        dailyItems.forEachIndexed { index, item ->
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = if (index == 0) "Today" else formatDate(item.dt),
+                    fontSize = 15.sp,
+                    color = Color.White,
+                    modifier = Modifier.width(80.dp)
+                )
+                Image(
+                    painter = painterResource(id = getWeatherIcon(item.weather.firstOrNull()?.icon ?: "")),
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp)
+                )
+                Row(modifier = Modifier.width(100.dp), horizontalArrangement = Arrangement.End) {
+                    Text("${item.main.tempMax.toInt()}°", color = Color.White, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text("${item.main.tempMin.toInt()}°", color = Color.White.copy(alpha = 0.4f))
+                }
+            }
+            if (index < dailyItems.size - 1) {
+                HorizontalDivider(color = Color.White.copy(alpha = 0.05f))
             }
         }
     }
@@ -241,277 +615,21 @@ private fun getCurrentLocation(
 }
 
 @Composable
-fun SearchBar(
-    value: String, 
-    onValueChange: (String) -> Unit, 
-    onSearch: () -> Unit,
-    onMyLocationClick: () -> Unit,
-    isCelsius: Boolean,
-    onToggleUnits: () -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        TextField(
-            value = value,
-            onValueChange = onValueChange,
-            placeholder = { Text("Search city...", color = Color.White.copy(alpha = 0.6f)) },
-            modifier = Modifier
-                .weight(1f)
-                .clip(RoundedCornerShape(20.dp)),
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = Color.White.copy(alpha = 0.15f),
-                unfocusedContainerColor = Color.White.copy(alpha = 0.1f),
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White
-            ),
-            singleLine = true,
-            trailingIcon = {
-                IconButton(onClick = onSearch) {
-                    Icon(Icons.Default.Search, contentDescription = null, tint = Color.White)
-                }
-            }
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        IconButton(
-            onClick = onMyLocationClick,
-            modifier = Modifier
-                .size(48.dp)
-                .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(20.dp))
-        ) {
-            Icon(Icons.Default.LocationOn, contentDescription = "My Location", tint = Color.White)
-        }
-        Spacer(modifier = Modifier.width(8.dp))
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(20.dp))
-                .clickable { onToggleUnits() },
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = if (isCelsius) "°C" else "°F",
-                color = Color.White,
-                fontWeight = FontWeight.Bold
-            )
-        }
-    }
-}
-
-@Composable
-fun MainWeatherInfo(weather: WeatherResponse, isCelsius: Boolean) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = weather.name,
-            fontSize = 34.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color.White
-        )
-        
-        Image(
-            painter = painterResource(id = getWeatherIcon(weather.weather.firstOrNull()?.icon ?: "")),
-            contentDescription = null,
-            modifier = Modifier.size(120.dp).padding(vertical = 16.dp)
-        )
-
-        Text(
-            text = "${weather.main.temp.toInt()}°",
-            fontSize = 100.sp,
-            fontWeight = FontWeight.ExtraLight,
-            color = Color.White
-        )
-        Text(
-            text = weather.weather.firstOrNull()?.description?.uppercase() ?: "",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Medium,
-            color = Color.White.copy(alpha = 0.8f),
-            letterSpacing = 2.sp
-        )
-        Row(
-            modifier = Modifier.padding(top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(text = "H:${weather.main.tempMax.toInt()}°", color = Color.White, fontSize = 16.sp)
-            Spacer(modifier = Modifier.width(16.dp))
-            Text(text = "L:${weather.main.tempMin.toInt()}°", color = Color.White, fontSize = 16.sp)
-        }
-    }
-}
-
-@Composable
-fun SectionTitle(title: String) {
-    Text(
-        text = title,
-        fontSize = 18.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = Color.White,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 16.dp)
-    )
-}
-
-@Composable
-fun HourlyForecastList(forecast: ForecastResponse, isCelsius: Boolean) {
-    LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        items(forecast.list.take(12)) { item ->
-            HourlyItem(item)
-        }
-    }
-}
-
-@Composable
-fun HourlyItem(item: ForecastItem) {
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.1f)),
-        modifier = Modifier.width(70.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .padding(vertical = 12.dp)
-                .fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = formatTime(item.dt),
-                fontSize = 12.sp,
-                color = Color.White.copy(alpha = 0.7f)
-            )
-            Image(
-                painter = painterResource(id = getWeatherIcon(item.weather.firstOrNull()?.icon ?: "")),
-                contentDescription = null,
-                modifier = Modifier
-                    .size(40.dp)
-                    .padding(vertical = 4.dp)
-            )
-            Text(
-                text = "${item.main.temp.toInt()}°",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
-        }
-    }
-}
-
-@Composable
-fun DailyForecastList(forecast: ForecastResponse, isCelsius: Boolean) {
-    val dailyItems = forecast.list.filterIndexed { index, _ -> index % 8 == 0 }
-    
-    Card(
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.1f)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            dailyItems.forEach { item ->
-                DailyItem(item)
-                if (item != dailyItems.last()) {
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.1f), modifier = Modifier.padding(vertical = 12.dp))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun DailyItem(item: ForecastItem) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(
-            text = formatDate(item.dt),
-            fontSize = 16.sp,
-            color = Color.White,
-            modifier = Modifier.weight(1f)
-        )
-        Image(
-            painter = painterResource(id = getWeatherIcon(item.weather.firstOrNull()?.icon ?: "")),
-            contentDescription = null,
-            modifier = Modifier.size(32.dp)
-        )
-        Row(
-            modifier = Modifier.weight(1f),
-            horizontalArrangement = Arrangement.End
-        ) {
-            Text(text = "${item.main.tempMax.toInt()}°", color = Color.White, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(text = "${item.main.tempMin.toInt()}°", color = Color.White.copy(alpha = 0.6f))
-        }
-    }
-}
-
-@Composable
-fun WeatherDetailsGrid(weather: WeatherResponse, isCelsius: Boolean) {
-    val windUnit = if (isCelsius) "km/h" else "mph"
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            DetailCard(Modifier.weight(1f), "HUMIDITY", "${weather.main.humidity}%", R.drawable.humidity)
-            DetailCard(Modifier.weight(1f), "WIND", "${weather.wind.speed} $windUnit", R.drawable.wind)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            DetailCard(Modifier.weight(1f), "FEELS LIKE", "${weather.main.feelsLike.toInt()}°", R.drawable.suncloud)
-            DetailCard(Modifier.weight(1f), "PRESSURE", "${weather.main.pressure} hPa", R.drawable.storm)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            DetailCard(Modifier.weight(1f), "SUNRISE", formatTime(weather.sys.sunrise), R.drawable.sun)
-            DetailCard(Modifier.weight(1f), "SUNSET", formatTime(weather.sys.sunset), R.drawable.moon)
-        }
-    }
-}
-
-@Composable
-fun DetailCard(modifier: Modifier, label: String, value: String, iconRes: Int) {
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.1f)),
-        modifier = modifier.height(110.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .padding(16.dp)
-                .fillMaxSize(),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    painter = painterResource(id = iconRes),
-                    contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.6f),
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(text = label, fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f), fontWeight = FontWeight.Bold)
-            }
-            Text(text = value, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-        }
-    }
-}
-
-@Composable
 fun ErrorView(onRetry: () -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("Oops! Something went wrong.", color = Color.White, fontSize = 20.sp)
-        Button(onClick = onRetry, modifier = Modifier.padding(top = 16.dp)) {
-            Text("Retry")
+        Icon(Icons.Default.CloudOff, contentDescription = null, tint = Color.White.copy(alpha = 0.2f), modifier = Modifier.size(64.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+        Text("Connection issues", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+        Button(
+            onClick = onRetry, 
+            modifier = Modifier.padding(top = 24.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.1f))
+        ) {
+            Text("Try again", color = Color.White)
         }
     }
 }
@@ -520,27 +638,26 @@ fun formatTime(timestamp: Long): String {
     return SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timestamp * 1000))
 }
 
+fun formatLocalTime(timestamp: Long, timezoneOffset: Int): String {
+    val date = Date((timestamp + timezoneOffset) * 1000)
+    val sdf = SimpleDateFormat("hh:mm a", Locale.US)
+    sdf.timeZone = TimeZone.getTimeZone("UTC")
+    return sdf.format(date)
+}
+
 fun formatDate(timestamp: Long): String {
     val date = Date(timestamp * 1000)
-    val calendar = Calendar.getInstance()
-    val today = Calendar.getInstance()
-    calendar.time = date
-    
-    return if (calendar.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)) {
-        "Today"
-    } else {
-        SimpleDateFormat("EEE", Locale.getDefault()).format(date)
-    }
+    return SimpleDateFormat("EEE", Locale.getDefault()).format(date)
 }
 
 fun getBackgroundColors(icon: String): List<Color> {
     return when (icon.dropLast(1)) {
-        "01" -> listOf(Color(0xFF29B6F6), Color(0xFF0288D1)) // Clear
-        "02", "03", "04" -> listOf(Color(0xFF607D8B), Color(0xFF455A64)) // Clouds
-        "09", "10", "11" -> listOf(Color(0xFF37474F), Color(0xFF263238)) // Rain
-        "13" -> listOf(Color(0xFF81D4FA), Color(0xFF4FC3F7)) // Snow
-        "50" -> listOf(Color(0xFF78909C), Color(0xFF546E7A)) // Mist
-        else -> listOf(Color(0xFF1A237E), Color(0xFF3949AB))
+        "01" -> listOf(Color(0xFF0EA5E9), Color(0xFF0284C7))
+        "02", "03", "04" -> listOf(Color(0xFF64748B), Color(0xFF334155))
+        "09", "10", "11" -> listOf(Color(0xFF334155), Color(0xFF0F172A))
+        "13" -> listOf(Color(0xFF7DD3FC), Color(0xFF0EA5E9))
+        "50" -> listOf(Color(0xFF94A3B8), Color(0xFF475569))
+        else -> listOf(Color(0xFF1E293B), Color(0xFF0F172A))
     }
 }
 

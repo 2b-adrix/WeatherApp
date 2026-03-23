@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -67,6 +68,12 @@ dependencies {
     implementation(libs.generative.ai)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.lottie.compose)
+    implementation("androidx.compose.material:material-icons-extended")
+    
+    // Room for 20/20 Offline Caching
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    ksp(libs.room.compiler)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
